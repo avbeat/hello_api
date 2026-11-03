@@ -1,0 +1,19 @@
+[project]
+name = "hello_api"
+version = "0.1.0"
+description = "Casual hello/goodbye API"
+authors = [
+    {name = "Avneet Badwal",email = "avneet7799@gmail.com"}
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi (>=0.162.0,<0.163.0)",
+    "uvicorn (>=0.54.0,<0.55.0)"
+]
+
+[tool.poetry]
+package-mode = false
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
