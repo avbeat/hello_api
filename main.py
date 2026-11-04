@@ -23,16 +23,27 @@ FORTUNE_PROMPT = (
     "Reply with only the fortune, no quotes or commentary."
 )
 
+# Thinking tokens count toward max_output_tokens, so keep thinking minimal.
+MINIMAL_THINKING = types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+
 GENERATE_CONFIG = types.GenerateContentConfig(
     max_output_tokens=100,
-    # Thinking tokens count toward max_output_tokens, so keep thinking minimal.
-    thinking_config=types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL),
+    thinking_config=MINIMAL_THINKING,
+)
+
+ASK_MAX_CHARS = 200
+ASK_CONFIG = types.GenerateContentConfig(
+    system_instruction=(
+        "You are a concise assistant. Answer the user's question in three sentences or fewer."
+    ),
+    max_output_tokens=200,
+    thinking_config=MINIMAL_THINKING,
 )
 
 app = FastAPI()
 
 
-class GeminiError(Exception):
+class ApiError(Exception):
     def __init__(self, message: str, status_code: int):
         super().__init__(message)
         self.message = message
@@ -47,31 +58,31 @@ def get_client() -> genai.Client:
     )
 
 
-def generate(prompt: str) -> str:
+def generate(prompt: str, config: types.GenerateContentConfig = GENERATE_CONFIG) -> str:
     if not GOOGLE_CLOUD_PROJECT:
-        raise GeminiError("Server is not configured: GOOGLE_CLOUD_PROJECT is not set.", 500)
+        raise ApiError("Server is not configured: GOOGLE_CLOUD_PROJECT is not set.", 500)
     try:
         response = get_client().models.generate_content(
-            model=GEMINI_MODEL, contents=prompt, config=GENERATE_CONFIG
+            model=GEMINI_MODEL, contents=prompt, config=config
         )
     except GoogleAuthError:
         logger.exception("Google Cloud authentication failed")
-        raise GeminiError("Server could not authenticate with Google Cloud.", 500)
+        raise ApiError("Server could not authenticate with Google Cloud.", 500)
     except errors.APIError as e:
         logger.exception("Gemini API call failed")
         if e.code == 429:
-            raise GeminiError("Gemini is busy or over quota. Try again later.", 503)
-        raise GeminiError("Gemini request failed.", 502)
+            raise ApiError("Gemini is busy or over quota. Try again later.", 503)
+        raise ApiError("Gemini request failed.", 502)
 
     text = (response.text or "").strip()
     if not text:
         logger.error("Gemini returned an empty response: %s", response)
-        raise GeminiError("Gemini returned an empty response.", 502)
+        raise ApiError("Gemini returned an empty response.", 502)
     return text
 
 
-@app.exception_handler(GeminiError)
-def gemini_error_handler(request, exc: GeminiError):
+@app.exception_handler(ApiError)
+def api_error_handler(request, exc: ApiError):
     return JSONResponse({"error": exc.message}, status_code=exc.status_code)
 
 
@@ -93,3 +104,13 @@ def haiku():
 @app.get("/fortune")
 def fortune():
     return {"fortune": generate(FORTUNE_PROMPT)}
+
+
+@app.get("/ask")
+def ask(q: str | None = None):
+    # Validate before calling Gemini so rejected requests cost nothing.
+    if q is None or not q.strip():
+        raise ApiError("Query parameter 'q' is required and cannot be empty.", 400)
+    if len(q) > ASK_MAX_CHARS:
+        raise ApiError(f"Query parameter 'q' must be {ASK_MAX_CHARS} characters or fewer.", 400)
+    return {"answer": generate(q, ASK_CONFIG)}
