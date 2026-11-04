@@ -1,6 +1,6 @@
 # hello_api
 
-A tiny FastAPI app with two casual endpoints and two that ask Google's Gemini (via Vertex AI) to write something.
+A tiny FastAPI app with two casual endpoints and three that use Google's Gemini (via Vertex AI).
 
 ## Endpoints
 
@@ -10,12 +10,34 @@ A tiny FastAPI app with two casual endpoints and two that ask Google's Gemini (v
 | GET    | `/goodbye` | `{"message": "Catch you later! Take it easy. ✌️"}`          |
 | GET    | `/haiku`   | `{"haiku": "..."}`: a short DevOps haiku written by Gemini   |
 | GET    | `/fortune` | `{"fortune": "..."}`: a one-sentence software fortune by Gemini |
+| GET    | `/ask?q=…` | `{"answer": "..."}`: Gemini's short answer to your question  |
 
 `/haiku` and `/fortune` use fixed prompts, take no input, and cap Gemini's reply at about 100 output tokens.
-If a Gemini call fails, they return a JSON error instead of crashing:
+
+### `/ask`
+
+`/ask` sends the `q` query parameter to Gemini and returns its answer. Because it's public and every call costs money, it's capped:
+
+- `q` is required and must be 1–200 characters. A missing, empty (or whitespace-only), or too-long `q` gets a `400` before Gemini is called, so it costs nothing.
+- A system instruction tells Gemini to answer in three sentences or fewer, and the reply is limited to about 200 output tokens.
+
+```bash
+curl -G --data-urlencode "q=What is CI/CD?" localhost:8080/ask
+```
+
+```json
+{"error": "Query parameter 'q' must be 200 characters or fewer."}
+```
+
+`/ask` has no authentication or rate limiting. To cap spending on Cloud Run, limit instances (`gcloud run deploy ... --max-instances 2`) and set a budget alert or a lower Vertex AI quota for the project.
+
+### Errors
+
+Errors come back as JSON instead of a crash:
 
 | Status | When                                                                 |
 |--------|----------------------------------------------------------------------|
+| 400    | `/ask` only: `q` is missing, empty, or longer than 200 characters    |
 | 500    | `GOOGLE_CLOUD_PROJECT` isn't set, or Google Cloud credentials are missing/invalid |
 | 502    | Vertex AI returned an error or an empty (e.g. blocked) response      |
 | 503    | Gemini is rate-limited or over quota (HTTP 429)                      |
@@ -78,6 +100,7 @@ curl localhost:8080/hello
 curl localhost:8080/goodbye
 curl localhost:8080/haiku
 curl localhost:8080/fortune
+curl -G --data-urlencode "q=What is Kubernetes?" localhost:8080/ask
 ```
 
 ## Deployment (Google Cloud Run)
